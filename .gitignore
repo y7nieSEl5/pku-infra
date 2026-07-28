@@ -46,7 +46,11 @@ assignment*/cuda/bin/
 # Misc
 .DS_Store
 
-# User notes
+# User personal files
 cof.md
 cot.md
 notes.md
+secrets/
+
+# Organizer-only tooling (HPC Game 题库上传脚本等)
+tools/
