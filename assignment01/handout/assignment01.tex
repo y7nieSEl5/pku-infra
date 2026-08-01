@@ -282,6 +282,21 @@ GPU 铺满 grid & & \\
 \end{tabular}
 \end{center}
 
+\begin{answer}
+\begin{center}\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+配置 & 耗时 (ms) & ns / 元素 \\
+\midrule
+CPU 单线程 & 4.696 & 1.12 \\
+GPU \texttt{<<<1,1>>>} & 168.391 & 40.15 \\
+GPU \texttt{<<<1,256>>>} & 2.842 & 0.68 \\
+GPU 铺满 grid & 0.021 & 0.01 (16384 blocks x 256 threads) \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{answer}
+
 \prob[Optional]{1.6}{FROM-SCRATCH}[kernels/simt\_sim.py]
 SIMT Simulator —— 写一个 warp 的执行模拟器：32 个 lane、共享控制流、带 mask 的分支执行与汇合。请在 \texttt{kernels/simt\_sim.py} 内完成（docstring 里面有具体实现要求）。工作量大概是 50 行以内的 Python。不需要 GPU。注：本题为 Module 3 的实验结果提供理论对照。判测命令如下：
 
