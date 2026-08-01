@@ -446,6 +446,14 @@ cd assignment01/cuda/m2_first_kernel
 ./judge_saxpy.sh saxpy.cu
 \end{lstlisting}
 
+\begin{answer}
+完整实现见 \texttt{cuda/m2\_first\_kernel/saxpy.cu}。程序以每个 thread 处理一个元素的方式实现 \texttt{y[i] = 2.0f * x[i] + y[i]}，使用 $(n - 1) / 256 + 1$ 个 block 覆盖非零长度的输入。它在 kernel 前后记录 CUDA event，并用 \texttt{cudaEventSynchronize(stop)} 等待 event 完成后取得 kernel 时间；随后 D2H copy 将结果放回 host，double 累加得到用于判测的 \texttt{SUM}。
+
+错误检查分两层：每个 runtime API 包在自写的 \texttt{CUDA\_CHECK} 中；kernel launch 后立即检查 \texttt{cudaGetLastError()}，event 同步还会使执行期错误可见。$n=0$ 则在 launch 之前直接输出 \texttt{SUM=0}，避免非法的零 block launch。
+
+\smallskip\textit{阅读：Guide 2.1.2.2--2.1.2.3（kernel launch、索引和边界），2.1.3.2（显式内存管理），2.1.4（host--device 同步），以及 2.5 ``Asynchronous Execution'' 的 CUDA event 计时。}
+\end{answer}
+
 注：SAXPY 即 Single-precision A$\cdot$X Plus Y。
 
 \begin{lookback}
