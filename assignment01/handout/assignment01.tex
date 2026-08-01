@@ -1,4 +1,5 @@
 % 作业 1：GPU 与 GPU 编程
+% !TeX program = xelatex
 % 编译：xelatex -interaction=nonstopmode assignment01.tex（跑两遍）
 \documentclass[11pt,a4paper,fontset=none]{ctexart}
 
@@ -11,6 +12,7 @@
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs,array,multirow}
 \usepackage{enumitem}
+\usepackage{needspace}
 \setlist{nosep,leftmargin=2em}
 \usepackage{xcolor}
 \definecolor{accent}{RGB}{28,60,120}
@@ -55,6 +57,12 @@
   title={Editor's Note}, fonttitle=\bfseries\sffamily\small,
   coltitle=black, attach title to upper={\quad},
   before upper app={\setlength{\parskip}{0.5em}}}
+
+\newtcolorbox{answer}{enhanced, breakable,
+  colback=green!3, colframe=green!45!black, boxrule=0.5pt, arc=1.5pt,
+  left=7pt, right=7pt, top=5pt, bottom=5pt,
+  title={作答}, fonttitle=\bfseries\sffamily\small,
+  coltitle=black, attach title to upper={\quad}}
 
 % 题目标题：\prob{编号}{TYPE}；选做题写 \prob[Optional]{编号}{TYPE}，必做不标注；
 % 题目主要涉及的文件用末尾的可选参数标在标题行右侧：\prob{编号}{TYPE}[相对路径]
@@ -176,8 +184,21 @@ Guide 1.1、1.2.1--1.2.2；LCPU 讲义\footnote{\url{https://github.com/interest
   \item “算力 1000 TFLOPS”意味着每次运算的延迟是 $10^{-15}$ 秒。
 \end{enumerate}
 
+\begin{answer}
+\begin{enumerate}[label=(\alph*)]
+  \item \textbf{错。}TFLOPS 是单位时间内可完成的总浮点运算量（吞吐），不能推出一条指令的完成延迟；GPU 往往以更多并发线程隐藏较长的延迟。
+  \item \textbf{对。}标称 HBM 带宽描述的是有足够并发、访问模式合适时的总传输吞吐；零散随机访问会受事务粒度、合并效率和访存延迟限制。
+  \item \textbf{对。}严格依赖使并行度接近一，运行时间主要由关键路径上的每步延迟决定，额外的 GPU 吞吐资源几乎无从利用。
+  \item \textbf{错。}1000 TFLOPS 表示理想条件下每秒约可完成 $10^{15}$ 次浮点运算，不是“一次运算花 $10^{-15}$ 秒”。
+\end{enumerate}
+\end{answer}
+
 \prob{1.2}{CONCEPT}
 Session 1 讲座里提过“N 方过百万”这个例子。总计算量 $10^{12}$ FLOP 在当代 GPU 上的运算时间大概是毫秒级，那为什么一个严格在线的串行算法仍然做不到几秒内跑完？（从“延迟”和“吞吐”的角度考虑）
+
+\begin{answer}
+GPU 的毫秒级估算隐含了有大量\emph{彼此独立}的 FLOP 可以同时发射，从而把总工作量除以高吞吐。严格在线算法的第 $i+1$ 步必须等待第 $i$ 步的结果，关键路径因而接近 $10^{12}$ 步：同一时刻通常只暴露出极少量可并行工作。此时每步的算术、数据相关和访存\emph{延迟}要逐步累加，不能由更多 SM 或更高 TFLOPS 抵消。即便乐观地按每步 $1\,\mathrm{ns}$ 估算，$10^{12}$ 个依赖步骤也要 $10^3$ 秒；实际还可能有访存和控制开销。
+\end{answer}
 
 \prob{1.3}{CONCEPT}
 补全下表（thread 一行已填好作为示例）
@@ -195,8 +216,31 @@ grid &  &  &  &  \\
 \end{tabular}
 \end{center}
 
+% 1.3 的作答表较高；避免只排出作答框标题后就分页。
+\Needspace{16\baselineskip}
+\begin{answer}
+\begin{center}\small
+\begin{tabular}{@{}p{5.2em}p{9em}p{7.5em}p{7.5em}p{8em}@{}}
+\toprule
+执行层次 & 软件含义 & 对应硬件 & 直接可用的存储 & 同步与通信手段 \\
+\midrule
+thread & kernel 的最小执行单位 & 计算单元上的一个 lane & 自己的寄存器 & （自身天然有序） \\
+warp & 同一 block 中通常 32 个一起调度的线程 & 一个 SM 上的 warp 与其调度器/执行 lanes & 各 lane 的寄存器 & \texttt{\_\_syncwarp()}；shuffle 等 warp 原语 \\
+block / CTA & 可协作的一组线程；一个 block 驻留在一个 SM & SM 上被分配资源并驻留的 CTA & 各线程寄存器、该 block 的 shared memory & \texttt{\_\_syncthreads()}；经 shared memory 通信 \\
+grid & 一次 kernel 启动的全部 blocks & 设备上所有参与执行的 SM & global memory & 普通 kernel 内无全 grid 同步；以 kernel 边界（或受限的 cooperative-groups）同步 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{answer}
+
 \prob{1.4}{CONCEPT}
 SIMD 与 SIMT 的区别？另：判断正误——Nvidia GPU 在 Volta 之后每个线程有独立的 program counter，所以 branch divergence 不再有性能代价。
+
+\begin{answer}
+\textbf{SIMD} 是向量指令模型：一条指令显式作用于多个数据 lane，通常由程序/编译器组织向量寄存器和控制流。\textbf{SIMT} 则让程序员写许多标量 thread；硬件把它们组成 warp，并通常以同一条指令、不同线程数据和 active mask 执行。因此 SIMT 保留了每线程的寄存器、线程索引与编程抽象，而分支不同的线程会让 warp 分路径执行。
+
+后一说法\textbf{错。}Volta 的 Independent Thread Scheduling 让线程具备更独立的执行状态，且改变了某些同步正确性要求；但分歧的路径仍要占用发射和执行资源，warp 的有效 active lanes 变少，通常仍会降低吞吐、产生性能代价。
+\end{answer}
 
 \prob{1.5}{EXPERIMENT}[cuda/m1\_why\_gpu/01\_scaling.cu]
 同一个向量加法，四种配置各跑一遍。
