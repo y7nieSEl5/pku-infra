@@ -361,7 +361,7 @@ make run/m2_first_kernel/02_vector_add_um
 \begin{answer}
 \begin{enumerate}[label=(\alph*)]
   \item kernel launch 对 host 是异步的。若 CPU 在 GPU 仍写 \texttt{c} 时就直接读取 unified memory，既可能读到未完成的结果，也没有建立正确的 host--device 访问顺序。因此在 CPU 读 \texttt{c} 前必须等待。这里的 \texttt{CUDA\_CHECK\_KERNEL()} 展开后调用 \texttt{cudaDeviceSynchronize()}，它就是这次显式同步。原显式管理版本也在同一个宏中同步；即便没有该宏，后面的同步 \texttt{cudaMemcpy(..., cudaMemcpyDeviceToHost)} 也会等待先前的 kernel 完成后再返回。
-  \item 显式管理版本的实测为 \textbf{31.2 ms}；unified memory 的数值应以同一机器、同一计时窗口下的实测为准。两版都必须把输入送到 GPU、并让输出可被 CPU 读取；区别在于显式版由两次 H2D 和一次 D2H copy 明确安排，而 unified memory 通常按页在 GPU 首次访问 \texttt{a}/\texttt{b}、CPU 首次扫描 \texttt{c} 时迁移。页错误处理、迁移粒度和访问位置可能使 UM 更慢；不同互连、硬件支持或运行时策略也可能令差距缩小。UM 减少的是代码中的显式搬运，不保证减少数据移动本身。
+  \item 此机器上，显式管理为 \textbf{31.2 ms}，unified memory 为 \textbf{32.9 ms}，即 UM 慢 $1.7\,\mathrm{ms}$（约 $5.4\%$）。两版都必须把输入送到 GPU、并让输出可被 CPU 读取；区别在于显式版由两次 H2D 和一次 D2H copy 明确安排，而 unified memory 通常按页在 GPU 首次访问 \texttt{a}/\texttt{b}、CPU 首次扫描 \texttt{c} 时迁移。页错误处理、迁移粒度和访问位置可解释这次小幅变慢；不同互连、硬件支持或运行时策略也可能令差距缩小或反转。UM 减少的是代码中的显式搬运，不保证减少数据移动本身。
 \end{enumerate}
 \end{answer}
 
@@ -372,6 +372,14 @@ make run/m2_first_kernel/02_vector_add_um
   \item 同一个 stream 里，\texttt{cudaMemcpy}（device 到 host）会等它前面的 kernel 全部完成后才开始拷贝。
   \item kernel 内部的非法访存，会在启动语句处同步地报出来。
 \end{enumerate}
+
+\begin{answer}
+\begin{enumerate}[label=(\alph*)]
+  \item \textbf{错。}kernel launch 对 host 异步；host 会继续执行，除非通过同步 API 等待完成。
+  \item \textbf{对。}同一 stream 中的操作有先后依赖；同步的 device-to-host \texttt{cudaMemcpy} 在返回给 host 前会等待此前 kernel 完成，并完成自身拷贝。
+  \item \textbf{错。}启动语句通常只会立刻暴露 launch 参数等错误；kernel 执行中的非法访存通常在后续同步（如 \texttt{cudaDeviceSynchronize()}）或其他会观察到异步错误的 CUDA API 处报告。
+\end{enumerate}
+\end{answer}
 
 \prob{2.5}{DEBUG}[cuda/m2\_first\_kernel/03\_bug\_launch.cu]
 修 bug：\texttt{03\_bug\_launch.cu}，详细内容见相关文件。
@@ -399,6 +407,12 @@ make run/m2_first_kernel/05_grid_stride
 
 然后请回答——这种写法的价值在哪里？launch 只有 16384 个线程时，性能上要付出什么代价？
 
+\begin{answer}
+grid-stride loop 令每个 thread 处理 \texttt{idx, idx + gridDim.x * blockDim.x, ...}，因而同一个 kernel 可覆盖任意 $n$，不必让 grid 大小与输入规模严格绑定。它也便于限制 launch 数量、复用 kernel，并可用 \texttt{<<<1, 1>>>} 做顺序调试。
+
+本题的 16384 个 thread 对 $2^{24}$ 个元素而言平均每个 thread 处理 1024 个元素。正确性不受影响，且同一轮迭代的相邻 lane 仍访问相邻元素；但若 GPU 本可同时驻留更多 block，这个小 grid 会减少并发 warp 数与未完成访存数，降低隐藏内存延迟、榨取带宽的能力。循环控制也有少量额外开销。
+\end{answer}
+
 \prob{2.8}{EXPERIMENT}[cuda/m2\_first\_kernel/06\_whoami.cu]
 运行下面的程序两三次，观察 16 个 block 打印输出的先后。
 
@@ -408,6 +422,12 @@ make run/m2_first_kernel/06_whoami
 \end{lstlisting}
 
 (a)~顺序由谁决定？(b)~程序的正确性可以依赖 block 的执行顺序吗？这条限制和 Guide 1.1 说的 scalable programming model 有什么关系？
+
+\begin{answer}
+三次输出都包含 0--15，但例如 block 10--15 与 4--7 的相对先后发生了变化。顺序由 GPU runtime/hardware scheduler 根据可用 SM、资源占用和当时执行状态决定；device-side \texttt{printf} 的缓冲与输出也不构成顺序保证。
+
+程序正确性\textbf{不能}依赖不同 block 的执行顺序，更不能让一个 block 等待另一个 block 的中间结果：另一个 block 可能尚未被调度。正是这条独立性约束使 grid 可以远大于 SM 数量，且同一程序可在不同规模的 GPU 上让 block 任意次序、并行或串行地执行，这就是 scalable programming model 的基础。
+\end{answer}
 
 \begin{capstone}{prob 2.9（FROM-SCRATCH）：SAXPY \hfill {\footnotesize\ttfamily cuda/m2\_first\_kernel/saxpy.cu}}
 在 \texttt{m2\_first\_kernel/} 下写出完整的 CUDA 程序 \texttt{saxpy.cu}，实现 $y \leftarrow 2.0 \cdot x + y$（单精度）。要求如下:
