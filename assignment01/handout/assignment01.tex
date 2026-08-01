@@ -338,6 +338,16 @@ make run/m2_first_kernel/01_vector_add
   \item block 内线程共享的暂存数组。
 \end{enumerate}
 
+\begin{answer}
+\begin{enumerate}[label=(\alph*)]
+  \item \texttt{\_\_global\_\_}：这是 host 启动、device 执行的 kernel 入口。
+  \item \texttt{\_\_device\_\_}：函数只在 device 上执行，且只能由 device 代码调用。
+  \item \texttt{\_\_host\_\_ \_\_device\_\_}：让同一份函数定义同时生成 host 与 device 两个版本。
+  \item \texttt{\_\_constant\_\_}：例如 \texttt{\_\_constant\_\_ float coeff[N];}；数据在一次 kernel 运行中只读且不变。
+  \item \texttt{\_\_shared\_\_}：例如 \texttt{\_\_shared\_\_ float tile[N];}；其存储期和可见范围都限于当前 block。
+\end{enumerate}
+\end{answer}
+
 \prob{2.3}{MODIFY}[cuda/m2\_first\_kernel/02\_vector\_add\_um.cu]
 \texttt{02\_vector\_add\_um.cu} 代码完整，但目前是“显式内存管理”的版本。改之前先按原样编译运行一次，记下耗时——这一版会被你的改动覆盖掉，下面 (b) 要拿它做对照。然后按文件头的说明改成 unified memory 版（\texttt{cudaMallocManaged}），并保持文件头写明的计时窗口不变。
 
