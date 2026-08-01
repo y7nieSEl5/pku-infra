@@ -358,6 +358,13 @@ make run/m2_first_kernel/02_vector_add_um
 
 然后请回答如下问题：(a)~kernel 启动之后、CPU 读结果之前，为什么必须有一次同步？在原先的版本里这次同步发生在哪个调用里？(b)~对比两版“搬运 + kernel + 读回”的耗时，分析差距的原因（谁快谁慢都有可能，与使用的卡有关）。
 
+\begin{answer}
+\begin{enumerate}[label=(\alph*)]
+  \item kernel launch 对 host 是异步的。若 CPU 在 GPU 仍写 \texttt{c} 时就直接读取 unified memory，既可能读到未完成的结果，也没有建立正确的 host--device 访问顺序。因此在 CPU 读 \texttt{c} 前必须等待。这里的 \texttt{CUDA\_CHECK\_KERNEL()} 展开后调用 \texttt{cudaDeviceSynchronize()}，它就是这次显式同步。原显式管理版本也在同一个宏中同步；即便没有该宏，后面的同步 \texttt{cudaMemcpy(..., cudaMemcpyDeviceToHost)} 也会等待先前的 kernel 完成后再返回。
+  \item 显式管理版本的实测为 \textbf{31.2 ms}；unified memory 的数值应以同一机器、同一计时窗口下的实测为准。两版都必须把输入送到 GPU、并让输出可被 CPU 读取；区别在于显式版由两次 H2D 和一次 D2H copy 明确安排，而 unified memory 通常按页在 GPU 首次访问 \texttt{a}/\texttt{b}、CPU 首次扫描 \texttt{c} 时迁移。页错误处理、迁移粒度和访问位置可能使 UM 更慢；不同互连、硬件支持或运行时策略也可能令差距缩小。UM 减少的是代码中的显式搬运，不保证减少数据移动本身。
+\end{enumerate}
+\end{answer}
+
 \prob{2.4}{CONCEPT}
 判断对错，可以顺带补一句理由。
 \begin{enumerate}[label=(\alph*)]
