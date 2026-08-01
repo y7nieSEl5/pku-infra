@@ -20,4 +20,46 @@ contract: 实现 run(program) -> (regs, cycles)
 
 
 def run(program):
-    raise NotImplementedError("从这里开始写")
+    regs = list(range(32))
+    cycles = 0
+
+    def execute(instructions, active):
+        """Execute instructions for lanes selected by ``active`` in program order."""
+        nonlocal cycles
+
+        for instruction in instructions:
+            op = instruction[0]
+
+            if op == "add":
+                _, value = instruction
+                for lane, enabled in enumerate(active):
+                    if enabled:
+                        regs[lane] += value
+                cycles += 1
+
+            elif op == "mul":
+                _, value = instruction
+                for lane, enabled in enumerate(active):
+                    if enabled:
+                        regs[lane] *= value
+                cycles += 1
+
+            elif op == "if_lt":
+                _, threshold, then_program, else_program = instruction
+                then_active = [enabled and regs[lane] < threshold
+                               for lane, enabled in enumerate(active)]
+                else_active = [enabled and not regs[lane] < threshold
+                               for lane, enabled in enumerate(active)]
+
+                # A divergent warp serializes its paths.  Empty paths issue
+                # no instructions, so skipping them also preserves cycle count.
+                if any(then_active):
+                    execute(then_program, then_active)
+                if any(else_active):
+                    execute(else_program, else_active)
+
+            else:
+                raise ValueError(f"unknown opcode: {op!r}")
+
+    execute(program, [True] * 32)
+    return regs, cycles
