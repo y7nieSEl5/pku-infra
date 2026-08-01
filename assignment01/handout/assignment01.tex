@@ -150,15 +150,32 @@ make run/m0_env/02_device_query
 \toprule
 项目 & 你的卡 \\
 \midrule
-型号 / compute capability & \\
-SM 数量 & \\
-warp 大小 & \\
-shared memory / block & \\
-最大常驻线程 / SM & \\
-显存总量 & \\
+型号 / compute capability &  \\
+SM 数量 &  \\
+warp 大小 &  \\
+shared memory / block &  \\
+最大常驻线程 / SM &  \\
+显存总量 &  \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+\begin{answer}
+\begin{center}\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+项目 & 你的卡 \\
+\midrule
+型号 / compute capability & NVIDIA RTX PRO 6000 Blackwell Server Edition / 12.0 \\
+SM 数量 & 188 \\
+warp 大小 & 32 \\
+shared memory / block & 49152 \\
+最大常驻线程 / SM & 1536 \\
+显存总量 & 101975851008 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{answer}
 
 \begin{lookback}
 本模块两道题看上去只是热身，但 prob 0.2 的那张表后面会反复被引用：Module 3 讨论 warp 要用 warp 大小，Module 4 手算驻留 block 数要用“shared memory / SM”与“最大常驻线程 / SM”。Keep it at hand.
