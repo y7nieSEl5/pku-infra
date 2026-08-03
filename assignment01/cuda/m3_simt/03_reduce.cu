@@ -39,11 +39,63 @@
 #define BLOCK 256
 
 __global__ void reduce_interleaved(const float *in, float *out) {
-    // TODO：从这里开始写（交错配对版本）
+    __shared__ float buf[BLOCK];
+    int tid = threadIdx.x;
+    int base = blockIdx.x * blockDim.x;
+
+    buf[tid] = in[base + tid];
+    __syncthreads();
+
+    for (int s = 1; s < blockDim.x; s *= 2) {
+        if (tid % (2 * s) == 0)
+            buf[tid] += buf[tid + s];
+        __syncthreads();
+    }
+
+    if (tid == 0)
+        out[blockIdx.x] = buf[0];
 }
 
 __global__ void reduce_contiguous(const float *in, float *out) {
-    // TODO：从这里开始写（连续配对版本）
+    __shared__ float buf[BLOCK];
+    int tid = threadIdx.x;
+    int base = blockIdx.x * blockDim.x;
+
+    buf[tid] = in[base + tid];
+    __syncthreads();
+
+    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (tid < s)
+            buf[tid] += buf[tid + s];
+        __syncthreads();
+    }
+
+    if (tid == 0)
+        out[blockIdx.x] = buf[0];
+}
+
+__global__ void reduce_shuffle(const float *in, float *out) {
+    __shared__ float warp_sums[BLOCK / 32];
+    int tid = threadIdx.x;
+    int lane = tid & 31;
+    int warp = tid >> 5;
+    int base = blockIdx.x * blockDim.x;
+    float x = in[base + tid];
+
+    for (int delta = 16; delta > 0; delta >>= 1)
+        x += __shfl_down_sync(0xffffffff, x, delta);
+
+    if (lane == 0)
+        warp_sums[warp] = x;
+    __syncthreads();
+
+    if (warp == 0) {
+        x = (lane < blockDim.x / 32) ? warp_sums[lane] : 0.0f;
+        for (int delta = 16; delta > 0; delta >>= 1)
+            x += __shfl_down_sync(0xffffffff, x, delta);
+        if (lane == 0)
+            out[blockIdx.x] = x;
+    }
 }
 
 // ---------------- 以下是判测与计时，不要修改 ----------------
@@ -102,10 +154,16 @@ int main() {
     float ratio = report_speedup("interleaved / contiguous", ms_i, ms_c, 1.5f,
                                  "两版耗时几乎一样，检查是不是写成同一个实现了");
 
+    float ms_s = run_one(reduce_shuffle, "shuffle    ", d_in, d_out, h_out,
+                         h_partial, nblocks);
+    float ratio1 = report_speedup("shuffle / contiguous", ms_s, ms_c, 1.5f,
+                           "shuffle 版比 contiguous 版快很多，说明 warp 内 shuffle "
+                           "比 shared memory 访问快很多");
+
     char metrics[192];
     snprintf(metrics, sizeof(metrics),
-             "{\"interleaved_ms\":%.4f,\"contiguous_ms\":%.4f,\"ratio\":%.3f}",
-             ms_i, ms_c, ratio);
+             "{\"interleaved_ms\":%.4f,\"contiguous_ms\":%.4f,\"ratio\":%.3f,\"shuffle_ms\":%.4f,\"ratio1\":%.3f}",
+             ms_i, ms_c, ratio, ms_s, ratio1);
     emit_result("3.5", "pass", metrics);
     return 0;
 }
