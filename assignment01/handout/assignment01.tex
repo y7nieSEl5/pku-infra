@@ -450,8 +450,6 @@ cd assignment01/cuda/m2_first_kernel
 完整实现见 \texttt{cuda/m2\_first\_kernel/saxpy.cu}。程序以每个 thread 处理一个元素的方式实现 \texttt{y[i] = 2.0f * x[i] + y[i]}，使用 $(n - 1) / 256 + 1$ 个 block 覆盖非零长度的输入。它在 kernel 前后记录 CUDA event，并用 \texttt{cudaEventSynchronize(stop)} 等待 event 完成后取得 kernel 时间；随后 D2H copy 将结果放回 host，double 累加得到用于判测的 \texttt{SUM}。
 
 错误检查分两层：每个 runtime API 包在自写的 \texttt{CUDA\_CHECK} 中；kernel launch 后立即检查 \texttt{cudaGetLastError()}，event 同步还会使执行期错误可见。$n=0$ 则在 launch 之前直接输出 \texttt{SUM=0}，避免非法的零 block launch。
-
-\smallskip\textit{阅读：Guide 2.1.2.2--2.1.2.3（kernel launch、索引和边界），2.1.3.2（显式内存管理），2.1.4（host--device 同步），以及 2.5 ``Asynchronous Execution'' 的 CUDA event 计时。}
 \end{answer}
 
 注：SAXPY 即 Single-precision A$\cdot$X Plus Y。
@@ -479,6 +477,14 @@ Guide 2.3.1--2.3.2、1.2.2.2。3.3、3.5 要用 shared memory，用法见 Guide 
   \item 若 \texttt{blockDim = (33, 1, 1)}，占几个 warp？这样配置浪费在哪里？
 \end{enumerate}
 
+\begin{answer}
+\begin{enumerate}[label=(\alph*)]
+  \item 线性编号为 $3 + 8 \cdot 5 = 43$。因此它属于 warp $\lfloor 43 / 32 \rfloor = 1$，lane 为 $43 \bmod 32 = 11$。
+  \item $8 \cdot 8 = 64$ 个 thread，恰好占 2 个 warp。
+  \item 33 个 thread 占 2 个 warp；第二个 warp 仅有 1 个 active lane，另外 31 个 lane 在整个 kernel 中都闲置，造成执行与资源利用浪费。
+\end{enumerate}
+\end{answer}
+
 \prob{3.2}{EXPERIMENT}[cuda/m3\_simt/01\_divergence.cu]
 \texttt{m3\_simt/01\_divergence.cu} 的两个 kernel 每线程计算量相同，分支划分不同——一个按 thread 编号的奇偶分（同一个 warp 里一半一半），一个按 warp 边界对齐分。请先预测一下哪个版本运行会更快一点，大概快几倍，然后运行验证：
 
@@ -489,6 +495,12 @@ make run/m3_simt/01_divergence
 
 请解释实测比值，并回答——若两个分支的计算量一大一小，按 thread 编号奇偶分的 kernel 和按 warp 边界对齐分的 kernel 的运行时间分别由什么决定？
 
+\begin{answer}
+实测中，warp 内分支为 \textbf{0.376 ms}，按 warp 分支为 \textbf{0.193 ms}，比值 \textbf{1.95}，接近 2。前者的每个 warp 都有 16 个 lane 走两个分支之一；warp 必须以 active mask 先后执行两条路径，因此每个 warp 近似承担两份循环工作。后者每个 warp 只走一条路径，32 个 lane 都活跃，两个分支的 warp 分别调度，避免了 warp 内路径串行化。
+
+若两条路径一重一轻，奇偶分支的每个 warp 仍要串行执行\emph{重路径 + 轻路径}，时间近似由二者之和决定。warp 对齐分支则让每个 warp 只执行其所属路径；总完成时间取决于重/轻 warp 的数量、它们在各 SM 上的分布与重路径时长，重路径不再被强加给原本应走轻路径的 lane。
+\end{answer}
+
 \prob{3.3}{EXPERIMENT}[cuda/m3\_simt/02\_sync\_matters.cu]
 \texttt{02\_sync\_matters.cu} 让每个 block 用 shared memory 把自己的 256 个元素倒序。请按文件开头的注释内容进行实验。
 
@@ -498,6 +510,13 @@ make run/m3_simt/02_sync_matters
 \end{lstlisting}
 
 (a)~为什么注释掉 sync 后代码不能正确地运行？(b)~(Optional) 注释掉 sync 后，翻转后的数组错的位置比较随机，但是有些位置一直是对的，试解释原因。（tip: 算一算 $t$ 与 $255-t$ 有没有可能落在同一个 warp）
+
+\begin{answer}
+\begin{enumerate}[label=(\alph*)]
+  \item 每个 thread 先写 \texttt{buf[t]}，却由另一个 thread 读取 \texttt{buf[255-t]}。没有 \texttt{\_\_syncthreads()} 时，某个 warp 可以在其他 warp 完成写入前开始读 shared memory，形成跨 warp 的读写竞争；因此会读到旧值或尚未写入的值。你观测到 index 0 的 mismatch 正是这种情况。
+  \item 对 256-thread block，$t$ 所在 warp 与 $255-t$ 所在 warp 始终不同：warp $w$ 的 source 来自 warp $7-w$，不存在 ``同 warp 因 lockstep 而天然有序'' 的特例。因此任何看似总是正确的位置都只是当前 GPU 的 warp 调度、旧 shared-memory 内容或时序碰巧稳定，\textbf{没有} CUDA 正确性保证。
+\end{enumerate}
+\end{answer}
 
 \prob{3.4}{CONCEPT}
 \texttt{\_\_syncthreads} 只能同步本 block 内的 threads，那需要全 grid 同步时，标准做法是什么？
